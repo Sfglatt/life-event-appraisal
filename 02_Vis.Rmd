@@ -1,0 +1,183 @@
+---
+title: "02_Vis"
+author: "Sglatt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages
+```{r}
+if (!require("dplyr")) {
+  install.packages("dplyr")
+  require("dplyr")
+}
+if (!require("tidyverse")) {
+  install.packages("tidyverse")
+  require("tidyverse")
+}
+if (!require("ggplot2")) {
+  install.packages("ggplot2")
+  require("ggplot2")
+}
+if (!require("ggridges")) {
+  install.packages("ggridges")
+  require("ggridges")
+}
+```
+
+# Data 
+```{r}
+# Import stress data - from 01_Data
+long_df_final <- read.csv("01_Output/long_stress_ratings_2025-07-15.csv")
+colnames(long_df_final)
+
+# Exclude miltary ipmact == 3
+
+long_df_final <- long_df_final[long_df_final$MilitaryImpactScoreBinary != 3, ]
+
+# Make folder for output
+if (!dir.exists("02_Output")) {
+  dir.create("02_Output")
+}
+```
+
+# Visualization for events - stacked plots for events by timeframe
+```{r events vis}
+# Factor age
+long_df_final$AgeGroup_factor <- factor(long_df_final$AgeGroup, levels = c("0-10", "11-20", "21-30", "31-40", "41-50", "51-60"))
+
+# Make an age label for n's
+age_group_counts <- long_df_final %>%
+  count(AgeGroup_factor, .drop = FALSE)
+legend_labels <- paste0(age_group_counts$AgeGroup_factor, " (n = ", age_group_counts$n, ")")
+
+# Make an events label for n's
+event_name_counts <- long_df_final %>%
+  count(EventName) %>%
+  arrange(EventName)
+x_axis_labels <- paste0(event_name_counts$EventName, " (n = ", event_name_counts$n, ")")
+names(x_axis_labels) <- event_name_counts$EventName
+
+p1 <- ggplot(long_df_final, aes(x = AgeGroup_factor, fill = EventName)) +
+  geom_bar(position = "fill") +
+  labs(
+    title = "Relative frequency of life events by timeframe",
+    subtitle = "Each bar shows the proportional makeup of events within an age group",
+    x = "Age group",
+    y = "proportion",
+    fill = "Event"
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+p1
+
+p2 <- ggplot(long_df_final, aes(x = EventName, fill = AgeGroup_factor)) +
+  geom_bar(position = "fill") +
+  labs(
+    y = "Relative frequencies",
+    x = NULL,
+    fill = "Age group"
+  ) +
+  scale_fill_manual(
+    name = "Age Group",
+    labels = legend_labels,
+    values = c(
+      "0-10" = "#00CDCD",
+      "11-20" = "#9BCD9B",
+      "21-30" = "#9F79EE",
+      "31-40" = "#CDAF95",
+      "41-50" = "#FF82AB",
+      "51-60" = "#B03060"
+    )
+  ) +
+  scale_x_discrete(labels = x_axis_labels) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    legend.position = "top",
+    plot.margin = margin(t = 10, r = 10, b = 20, l = 40)
+  )
+
+p2
+
+p3 <- ggplot(long_df_final, aes(x = EventName, fill = AgeGroup_factor)) +
+  geom_bar(position = "stack") +
+  labs(
+    y = "Relative frequencies",
+    x = NULL,
+    fill = "Age group"
+  ) +
+  scale_fill_manual(
+    name = "Age Group",
+    labels = legend_labels,
+    values = c(
+      "0-10" = "#00CDCD",
+      "11-20" = "#9BCD9B",
+      "21-30" = "#9F79EE",
+      "31-40" = "#CDAF95",
+      "41-50" = "#FF82AB",
+      "51-60" = "#B03060"
+    )
+  ) +
+  scale_x_discrete(labels = x_axis_labels) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+    legend.position = "top",
+    plot.margin = margin(t = 10, r = 10, b = 20, l = 40)
+  )
+
+p3
+
+png(paste0("02_Output/Events_age_scaled_", format(Sys.Date(), "%Y-%m-%d"), ".png"), units = "in", width = 20, height = 10, res = 300)
+p2
+dev.off()
+
+png(paste0("02_Output/Events_age_stacked_", format(Sys.Date(), "%Y-%m-%d"), ".png"), units = "in", width = 20, height = 10, res = 300)
+p3
+dev.off()
+```
+
+# Personality by age
+```{r pers age}
+p4 <- ggplot(long_df_final, aes(x = PID_Psychoticism_SUM, y = EventGroup, fill = EventGroup)) +
+  geom_density_ridges(alpha = 0.8) +
+  facet_wrap(~AgeGroup) +
+  labs(
+    title = "Distribution of Psychoticism by event and timeframe",
+    x = "Psychoticism",
+    y = "Event type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+p5 <- ggplot(long_df_final, aes(x = PID_Disinhibition_SUM, y = EventGroup, fill = EventGroup)) +
+  geom_density_ridges(alpha = 0.8) +
+  facet_wrap(~AgeGroup) +
+  labs(
+    title = "Distribution of Disinhibition by event and timeframe",
+    x = "Disinhibition",
+    y = "Event type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+png(paste0("02_Output/Psychoticism_age_events_", format(Sys.Date(), "%Y-%m-%d"), ".png"), units = "in", width = 10, height = 8, res = 300)
+p4
+dev.off()
+
+png(paste0("02_Output/Disinhibition_age_events_", format(Sys.Date(), "%Y-%m-%d"), ".png"), units = "in", width = 10, height = 8, res = 300)
+p5
+dev.off()
+```

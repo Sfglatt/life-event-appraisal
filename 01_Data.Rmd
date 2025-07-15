@@ -1,0 +1,375 @@
+---
+title: "01_Data"
+author: "Sglatt"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r git, eval=FALSE}
+usethis::create_from_github("https://github.com/Sfglatt/life-event-appraisal.git",
+  destdir = "~/Github/life-event-appraisal"
+)
+```
+
+# Packages
+```{r packages}
+if (!require("dplyr")) {
+  install.packages("dplyr")
+  require("dplyr")
+}
+if (!require("tidyverse")) {
+  install.packages("tidyverse")
+  require("tidyverse")
+}
+if (!require("psych")) {
+  install.packages("psych")
+  require("psych")
+}
+```
+
+# Import data
+```{r data}
+# Import MILES data - from the M2C-vet repository
+MILES_df <- read.csv("~/Labs/Github/M2C-vet/M2C-vet/Created_data/MILES_merged_cleaner_2025-03-19.csv")
+colnames(MILES_df)
+
+# Make folder for output
+if (!dir.exists("01_Output")) {
+  dir.create("01_Output")
+}
+```
+
+# Get the life stress event data into long form
+```{r long}
+# Make a table for the 50 events
+event_labels <- tibble::tribble(
+  ~EventID, ~EventName,
+  1, "Spouse death",
+  2, "Child death",
+  3, "Divorce",
+  4, "Getting married",
+  5, "Marital/partnership separation",
+  6, "Close family death",
+  7, "Personal injury",
+  8, "Serious illness",
+  9, "Getting pregnant",
+  10, "Miscarriage or other termination of pregnancy",
+  11, "Getting fired",
+  12, "Getting laid off",
+  13, "Getting furloughed",
+  14, "Family member health change",
+  15, "Major financial difficulties",
+  16, "Close friend death",
+  17, "Major job change",
+  18, "Worrisome marital/partnership discord",
+  19, "Mortgage or loan foreclosure",
+  20, "Work responsibility changes",
+  21, "Birth of a child",
+  22, "Children leaving home",
+  23, "Trouble with relatives",
+  24, "Moving to another town/state",
+  25, "Negative changes in living conditions",
+  26, "Trouble with boss or manager",
+  27, "Negative changes in work hours/conditions",
+  28, "Problems continuing recreational activities",
+  29, "Problems with religious/spiritual activities",
+  30, "Problems with social activities",
+  31, "Long-term unemployment",
+  32, "Changes in sleeping habits",
+  33, "Minor law violations",
+  34, "Went to prison",
+  35, "Household member went to prison",
+  36, "Serious vehicular accident",
+  37, "Vehicle repossession",
+  38, "Parental divorce or separation",
+  39, "Witnessed physical abuse of a parent/caregiver",
+  40, "Lived with someone with severe depression or mental illness",
+  41, "Lived with someone who was a problem drinker or alcoholic",
+  42, "Sexual assault/abuse as a child",
+  43, "Verbal/emotional abuse by a parent/caregiver as a child",
+  44, "Physical abuse by a parent/caregiver as a child",
+  45, "Victim of bullying at school or work",
+  46, "Victim of abusive romantic relationship",
+  47, "Victim of rape or sexual assault (as a civilian)",
+  48, "Military sexual trauma",
+  49, "War trauma",
+  50, "Major flood or fire disaster"
+)
+
+# All events that actually occurred for each person.
+occurred_events <- MILES_df %>%
+  select(ID, matches("^MLES_\\d+$", ignore.case = TRUE)) %>%
+  pivot_longer(
+    cols = -ID,
+    names_to = "variable",
+    values_to = "occurred"
+  ) %>%
+  filter(occurred == 1) %>%
+  mutate(EventID = readr::parse_number(variable)) %>%
+  select(ID, EventID)
+
+# General life impact scores
+general_impact_data <- MILES_df %>%
+  select(ID, matches("_impact$", ignore.case = TRUE)) %>%
+  pivot_longer(cols = -ID, names_to = "variable", values_to = "GeneralImpactScore") %>%
+  mutate(EventID = readr::parse_number(variable)) %>%
+  select(ID, EventID, GeneralImpactScore)
+
+# military transition stress impact scores
+military_stress_data <- MILES_df %>%
+  select(ID, matches("_stress$", ignore.case = TRUE)) %>%
+  pivot_longer(cols = -ID, names_to = "variable", values_to = "MilitaryImpactScore") %>%
+  mutate(EventID = readr::parse_number(variable)) %>%
+  select(ID, EventID, MilitaryImpactScore)
+
+# Approximate age of event
+age_data <- MILES_df %>%
+  select(ID, matches("^MLES_\\d+_\\d+(_\\d+)?$")) %>% # only selects age-group columns
+  pivot_longer(cols = -ID, names_to = "variable", values_to = "selected") %>%
+  filter(selected == 1) %>%
+  extract(variable,
+    into = c("EventID", "AgeStart", "AgeEnd"),
+    regex = "MLES_(\\d+)_(\\d+)(?:_(\\d+))?"
+  ) %>%
+  mutate(
+    EventID = as.numeric(EventID),
+    AgeGroup = case_when(
+      !is.na(AgeEnd) ~ paste0(AgeStart, "-", AgeEnd),
+      AgeStart == "70" ~ "70+",
+      TRUE ~ AgeStart
+    )
+  ) %>%
+  select(ID, EventID, AgeGroup)
+
+# Make the final dataframe
+long_df_final <- occurred_events %>%
+  left_join(general_impact_data, by = c("ID", "EventID")) %>%
+  left_join(military_stress_data, by = c("ID", "EventID")) %>%
+  left_join(age_data, by = c("ID", "EventID")) %>%
+  left_join(event_labels, by = "EventID") %>%
+  left_join(MILES_df %>% select(
+    ID,
+    years_since_discharge,
+    Duration_service,
+    PID_total_SUM,
+    PID_Negative_Affect_SUM,
+    PID_Detachment_SUM,
+    PID_Antagonism_SUM,
+    PID_Disinhibition_SUM,
+    PID_Psychoticism_SUM,
+    IPOr_PDID_SUM,
+    IPOr_RT_SUM,
+    PF_Int_MEAN,
+    PF_E_MEAN,
+    PF_SD_MEAN,
+    PF_RF_MEAN,
+    PF_Id_MEAN,
+    PF_SF_MEAN,
+  ), by = "ID") %>%
+  filter(!is.na(AgeGroup)) %>%
+  select(
+    ID,
+    EventID,
+    EventName,
+    AgeGroup,
+    GeneralImpactScore,
+    MilitaryImpactScore,
+    years_since_discharge,
+    Duration_service,
+    PID_total_SUM,
+    PID_Negative_Affect_SUM,
+    PID_Detachment_SUM,
+    PID_Antagonism_SUM,
+    PID_Disinhibition_SUM,
+    PID_Psychoticism_SUM,
+    IPOr_PDID_SUM,
+    IPOr_RT_SUM,
+    PF_Int_MEAN,
+    PF_E_MEAN,
+    PF_SD_MEAN,
+    PF_RF_MEAN,
+    PF_Id_MEAN,
+    PF_SF_MEAN,
+  ) %>%
+  arrange(ID, EventID)
+```
+
+# Recode variable
+```{r vars}
+# Recode the military specific variable to 1 = yes, 0 = no.
+# Leave 3 (as is) alone - will filter it out (because it is "does not apply")
+
+long_df_final <- long_df_final %>%
+  mutate(MilitaryImpactScoreBinary = case_when(
+    MilitaryImpactScore == 1 ~ 1, # Keep 1 (yes)
+    MilitaryImpactScore == 2 ~ 0, # Recode 2 to 0
+    TRUE ~ MilitaryImpactScore # Keep 3 (n/a) as is
+  ))
+
+# Confirm
+table(long_df_final$MilitaryImpactScore)
+table(long_df_final$MilitaryImpactScoreBinary)
+
+# Look at item-level outcome separation
+military_impact_ratings <- long_df_final %>%
+  filter(MilitaryImpactScoreBinary != 3) %>%
+  group_by(EventName, MilitaryImpactScoreBinary) %>%
+  summarise(n = n()) %>%
+  tidyr::pivot_wider(names_from = MilitaryImpactScoreBinary, values_from = n, values_fill = 0) %>%
+  rename(NotImpactful = `0`, Impactful = `1`)
+
+write.csv(
+  military_impact_ratings,
+  paste0("01_Output/military_impact_ratings_", Sys.Date(), ".csv"),
+  row.names = FALSE
+)
+
+# Make an events GROUP variable
+long_df_final <- long_df_final %>%
+  mutate(EventGroup = case_when(
+    EventName %in% c(
+      "Spouse death", "Child death", "Divorce", "Getting married",
+      "Marital/partnership separation", "Close family death", "Close friend death",
+      "Birth of a child", "Children leaving home", "Parental divorce or separation",
+      "Worrisome marital/partnership discord"
+    ) ~ "Relationship/family/bereavement",
+    EventName %in% c(
+      "Personal injury", "Serious illness", "Family member health change",
+      "Getting pregnant", "Miscarriage or other termination of pregnancy",
+      "Serious vehicular accident", "Physical abuse by a parent/caregiver as a child",
+      "Sexual assault/abuse as a child", "Verbal/emotional abuse by a parent/caregiver as a child",
+      "Witnessed physical abuse of a parent/caregiver", "Victim of abusive romantic relationship",
+      "Victim of rape or sexual assault (as a civilian)", "Victim of bullying at school or work",
+      "Military sexual trauma", "War trauma", "Major flood or fire disaster",
+      "Lived with someone who was a problem drinker or alcoholic",
+      "Lived with someone with severe depression or mental illness",
+      "Went to prison", "Household member went to prison"
+    ) ~ "Health/trauma/victimization",
+    EventName %in% c(
+      "Getting fired", "Getting laid off", "Getting furloughed",
+      "Major financial difficulties", "Major job change", "Mortgage or loan foreclosure",
+      "Work responsibility changes", "Negative changes in living conditions",
+      "Trouble with boss or manager", "Negative changes in work hours/conditions",
+      "Long-term unemployment", "Vehicle repossession"
+    ) ~ "Economic/work/living stress",
+    EventName %in% c(
+      "Trouble with relatives", "Moving to another town/state",
+      "Problems continuing recreational activities", "Problems with religious/spiritual activities",
+      "Problems with social activities", "Changes in sleeping habits", "Minor law violations"
+    ) ~ "Social/routine/other",
+    TRUE ~ NA_character_
+  ))
+
+# Make a collapsed age variable
+long_df_final <- long_df_final %>%
+  mutate(
+    AgeGroupCollapsed = case_when(
+      AgeGroup %in% c("0-10", "11-20") ~ "Child/Teen/Young Adult",
+      AgeGroup %in% c("21-30", "31-40") ~ "Adult",
+      AgeGroup %in% c("41-50", "51-60") ~ "Older Adult",
+      TRUE ~ NA_character_
+    ),
+    AgeGroupCollapsed = factor(
+      AgeGroupCollapsed,
+      levels = c("Child/Teen/Young Adult", "Adult", "Older Adult")
+    )
+  )
+
+# How many people?
+dplyr::n_distinct(long_df_final$ID) # 35 people
+
+head(long_df_final)
+colnames(long_df_final)
+
+# Save the final dataset
+write.csv(
+  long_df_final,
+  paste0("01_Output/long_stress_ratings_", Sys.Date(), ".csv"),
+  row.names = FALSE
+)
+```
+
+# Descriptive statistics for events
+```{r describe events}
+# Total number of UNIQUE events (of the 50 events, how many were endorsed AT LEAST once)
+total_unique_events <- long_df_final[long_df_final$MilitaryImpactScoreBinary != 3, ] %>%
+  pull(EventID) %>%
+  unique() %>%
+  length()
+
+# Range of UNIQUE events per Veteran
+event_counts <- long_df_final[long_df_final$MilitaryImpactScoreBinary != 3, ] %>%
+  distinct(ID, EventID) %>%
+  count(ID, name = "n_unique_events")
+
+event_counts %>%
+  summarise(
+    min = min(n_unique_events),
+    max = max(n_unique_events),
+    median = median(n_unique_events),
+    range = max(n_unique_events) - min(n_unique_events),
+    mean = mean(n_unique_events),
+    sd = sd(n_unique_events),
+    sum(event_counts$n_unique_events)
+  )
+
+# Range of TOTAL events per Veteran
+event_counts <- long_df_final[long_df_final$MilitaryImpactScoreBinary != 3, ] %>% count(ID, name = "n_events")
+
+event_counts %>%
+  summarise(
+    min = min(n_events),
+    max = max(n_events),
+    median = median(n_events),
+    range = max(n_events) - min(n_events),
+    mean = mean(n_events),
+    sd = sd(n_events),
+    sum(event_counts$n_events)
+  )
+
+# Make sure there are no duplicates
+duplicates <- long_df_final %>%
+  filter(MilitaryImpactScoreBinary != 3) %>%
+  group_by(ID, EventName, AgeGroup) %>%
+  filter(n() > 1)
+
+# Identify event-person pairs that occur at more then onetime
+multiple_ages <- long_df_final %>%
+  filter(MilitaryImpactScoreBinary != 3) %>%
+  group_by(ID, EventName) %>%
+  filter(n_distinct(AgeGroup) > 1) %>%
+  arrange(ID, EventName, AgeGroup) %>%
+  ungroup()
+
+multiple_ages
+
+# How many people reported a single type of event at more then one time?
+multi_period_participants <- long_df_final %>%
+  filter(MilitaryImpactScoreBinary != 3) %>%
+  group_by(ID, EventID) %>%
+  filter(n_distinct(AgeGroup) > 1) %>%
+  ungroup() %>%
+  distinct(ID)
+
+nrow(multi_period_participants)
+nrow(multi_period_participants) / n_distinct(long_df_final[long_df_final$MilitaryImpactScoreBinary != 3, ]$ID) * 100
+
+# Table with events and n endorsed
+event_counts_table <- long_df_final %>%
+  distinct(ID, EventName) %>%
+  count(EventName, name = "n_veterans") %>%
+  arrange(desc(n_veterans))
+
+event_counts_table
+
+write.csv(
+  event_counts_table,
+  paste0("01_Output/events_n_table_", Sys.Date(), ".csv"),
+  row.names = FALSE
+)
+```
+
